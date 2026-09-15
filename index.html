@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#07070a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<title>PoseFrame AI</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050507;color:#fff;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+#app{height:100dvh;position:relative;background:#000}#video,#guide{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#guide{pointer-events:none}.shade{position:absolute;inset:0;background:linear-gradient(#0009,transparent 25%,transparent 66%,#000d);pointer-events:none}
+.top{position:absolute;top:max(12px,env(safe-area-inset-top));left:14px;right:14px;display:flex;justify-content:space-between;align-items:center;z-index:3}
+.pill{background:#0009;border:1px solid #fff2;border-radius:999px;padding:8px 11px;backdrop-filter:blur(14px);font-size:12px}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#79ffa9;margin-right:6px;box-shadow:0 0 10px #79ffa9}
+.scene{position:absolute;top:67px;left:50%;transform:translateX(-50%);z-index:3;background:#0009;border:1px solid #fff2;border-radius:999px;padding:8px 13px;font-size:12px;white-space:nowrap}
+.hint{position:absolute;left:18px;right:18px;bottom:171px;text-align:center;z-index:3;text-shadow:0 2px 12px #000;font-weight:750}
+.hint small{display:block;color:#ddd;font-weight:400;margin-top:5px;font-size:12px}
+.bottom{position:absolute;bottom:0;left:0;right:0;padding:10px 15px max(15px,env(safe-area-inset-bottom));z-index:3;background:linear-gradient(transparent,#000f 25%)}
+.modes{display:flex;gap:7px;overflow:auto;padding-bottom:10px;scrollbar-width:none}.modes::-webkit-scrollbar{display:none}
+.mode,.tool{border:1px solid #fff2;background:#111a;color:#ddd;border-radius:999px;padding:9px 12px;white-space:nowrap}.mode.active{background:#fff;color:#000}
+.controls{display:flex;justify-content:space-between;align-items:center}.tool{width:46px;height:46px;border-radius:50%;font-size:18px;padding:0}
+.shutter{width:74px;height:74px;border:4px solid #fff;border-radius:50%;background:transparent;padding:5px}.shutter i{display:block;width:100%;height:100%;border-radius:50%;background:#fff}
+#start{position:absolute;inset:0;z-index:10;background:#08080b;display:flex;align-items:center;justify-content:center;text-align:center;padding:28px}
+.card{max-width:350px}.logo{font-size:32px;font-weight:850;letter-spacing:-1.2px}.card p{color:#aaa;line-height:1.5}.primary{background:#fff;color:#000;border:0;border-radius:14px;padding:14px 24px;font-weight:800;font-size:15px}
+#toast{position:absolute;z-index:20;left:50%;bottom:122px;transform:translate(-50%,20px);opacity:0;background:#fff;color:#000;padding:10px 14px;border-radius:999px;font-size:12px;transition:.2s;white-space:nowrap}.show{opacity:1!important;transform:translate(-50%,0)!important}
+#score{position:absolute;right:14px;bottom:265px;z-index:4;background:#000b;border:1px solid #fff2;border-radius:15px;padding:10px 12px;font-size:11px;display:none;backdrop-filter:blur(12px)}#score.show{display:block}.bar{width:100px;height:4px;background:#ffffff22;border-radius:5px;margin-top:6px}.bar i{display:block;height:100%;width:78%;background:#fff;border-radius:5px}
+</style>
+</head>
+<body>
+<div id="app">
+<video id="video" autoplay muted playsinline></video><canvas id="guide"></canvas><div class="shade"></div>
+<div class="top"><div class="pill"><span class="dot"></span><span id="ai">AI OFFLINE</span></div><button class="tool" id="flip">↻</button></div>
+<div class="scene" id="scene">AI Auto • waiting for camera</div>
+<div class="hint"><span id="mainHint">Allow camera to start PoseFrame</span><small id="subHint">Live body tracking stays on your device.</small></div>
+<div id="score">Pose match <b id="scoreNum">--</b><div class="bar"><i id="scoreBar"></i></div></div>
+<div class="bottom">
+<div class="modes">
+<button class="mode active" data-mode="AI Auto">AI Auto</button><button class="mode" data-mode="Portrait">Portrait</button><button class="mode" data-mode="Full Body">Full Body</button><button class="mode" data-mode="Couple">Couple</button><button class="mode" data-mode="Nature">Nature</button><button class="mode" data-mode="Monument">Monument</button><button class="mode" data-mode="Street">Street</button>
+</div>
+<div class="controls"><button class="tool" id="grid">⊞</button><button class="shutter" id="snap"><i></i></button><button class="tool" id="timer">3s</button></div>
+</div><div id="toast"></div>
+<div id="start"><div class="card"><div class="logo">PoseFrame <span style="opacity:.4">AI</span></div><p>Live pose tracking, ghost-pose alignment and photography composition guidance.</p><button class="primary" id="allow">Allow Camera</button><p style="font-size:11px">Camera works when this app is opened from HTTPS, not as a local HTML file.</p></div></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+<script>
+const v=document.getElementById('video'), c=document.getElementById('guide'),x=c.getContext('2d');
+let stream=null,facing='user',grid=false,mode='AI Auto',pose=null,timer=0,lastPose=null;
+const modes={
+'AI Auto':['Find your best angle','AI is tracking your body and will correct your position'],
+'Portrait':['Turn 30° for a natural 3/4 pose','Keep shoulders relaxed and face the light'],
+'Full Body':['Fit head and feet inside the guide','Shift weight to one leg for a stronger silhouette'],
+'Couple':['Create a gentle diagonal','Keep the two bodies at different depths'],
+'Nature':['Use a third of the frame','Let paths, rivers or branches lead toward the subject'],
+'Monument':['Give the architecture breathing room','Try symmetry or a slightly low angle'],
+'Street':['Walk naturally through the frame','Use doorways, walls and light as framing']
+};
+function size(){c.width=innerWidth*devicePixelRatio;c.height=innerHeight*devicePixelRatio}
+function toast(t){let e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),1700)}
+function setMode(m){mode=m;document.querySelectorAll('.mode').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));document.getElementById('scene').textContent=m+' • AI guide';document.getElementById('mainHint').textContent=modes[m][0];document.getElementById('subHint').textContent=modes[m][1]}
+document.querySelectorAll('.mode').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
+document.getElementById('grid').onclick=()=>{grid=!grid;toast(grid?'Grid ON':'Grid OFF')};
+document.getElementById('flip').onclick=async()=>{facing=facing==='user'?'environment':'user';await startCamera()};
+document.getElementById('allow').onclick=startCamera;
+async function startCamera(){
+ try{
+  if(stream)stream.getTracks().forEach(t=>t.stop());
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:facing},width:{ideal:1280},height:{ideal:720}},audio:false});
+  v.srcObject=stream;document.getElementById('start').style.display='none';document.getElementById('ai').textContent='AI TRACKING';toast('Camera ready');pose.send({image:v});
+ }catch(e){toast('Camera permission failed — open the HTTPS app URL');console.error(e)}
+}
+function drawTarget(){
+ const W=innerWidth,H=innerHeight;x.clearRect(0,0,c.width,c.height);x.save();x.scale(devicePixelRatio,devicePixelRatio);
+ if(grid){x.strokeStyle='#ffffff45';x.lineWidth=1;[W/3,W*2/3].forEach(a=>{x.beginPath();x.moveTo(a,0);x.lineTo(a,H);x.stroke()});[H/3,H*2/3].forEach(a=>{x.beginPath();x.moveTo(0,a);x.lineTo(W,a);x.stroke()})}
+ // Target ghost pose: translucent ideal alignment box/skeleton.
+ x.strokeStyle='#ffffff99';x.lineWidth=2;x.setLineDash([7,7]);
+ const cx=W/2,cy=H*.47,r=Math.min(W*.11,52);x.beginPath();x.arc(cx,cy-r*1.45,r,0,Math.PI*2);x.stroke();
+ x.beginPath();x.moveTo(cx,cy-r*.45);x.lineTo(cx,cy+H*.22);x.moveTo(cx,cy-r*.2);x.lineTo(cx-W*.16,cy+H*.02);x.moveTo(cx,cy-r*.2);x.lineTo(cx+W*.16,cy+H*.02);x.moveTo(cx,cy+H*.22);x.lineTo(cx-W*.10,cy+H*.42);x.moveTo(cx,cy+H*.22);x.lineTo(cx+W*.10,cy+H*.42);x.stroke();x.setLineDash([]);
+ if(lastPose) drawPose(lastPose);
+ x.restore();
+}
+function drawPose(lm){
+ const W=innerWidth,H=innerHeight;
+ const connections=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[27,31],[28,32]];
+ x.strokeStyle='#ffffff';x.lineWidth=3;x.beginPath();
+ for(const [a,b] of connections){const p=lm[a],q=lm[b];if(p&&q&&p.visibility>.45&&q.visibility>.45){x.moveTo(p.x*W,p.y*H);x.lineTo(q.x*W,q.y*H)}}x.stroke();
+ for(const p of lm){if(p.visibility>.5){x.fillStyle='#fff';x.beginPath();x.arc(p.x*W,p.y*H,3,0,Math.PI*2);x.fill()}}
+}
+function analyze(lm){
+ const nose=lm[0],ls=lm[11],rs=lm[12],lh=lm[23],rh=lm[24],la=lm[27],ra=lm[28];
+ if(!nose||!ls||!rs)return;
+ const center=(ls.x+rs.x)/2, dx=center-.5;
+ let text=modes[mode][0], sub=modes[mode][1], score=82;
+ if(Math.abs(dx)>.08){text=dx<0?'Move slightly right →':'Move slightly left ←';score-=12}
+ const shoulderTilt=Math.abs(ls.y-rs.y);
+ if(shoulderTilt>.09){sub='Level your shoulders slightly for a cleaner frame';score-=6}
+ if(la&&ra&&la.visibility>.5&&ra.visibility>.5){
+  const feet=Math.max(Math.abs(la.x-.5),Math.abs(ra.x-.5));
+  if(mode==='Full Body'&&feet<.18){sub='Open your stance slightly for stronger lines';score-=5}
+ }
+ document.getElementById('mainHint').textContent=text;document.getElementById('subHint').textContent=sub;
+ document.getElementById('score').classList.add('show');document.getElementById('scoreNum').textContent=Math.max(55,Math.min(99,score))+'%';document.getElementById('scoreBar').style.width=score+'%';
+}
+pose=new Pose({locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`});
+pose.setOptions({modelComplexity:1,smoothLandmarks:true,minDetectionConfidence:.55,minTrackingConfidence:.55});
+pose.onResults(r=>{if(r.poseLandmarks){lastPose=r.poseLandmarks;analyze(r.poseLandmarks)}});
+async function loop(){if(v.readyState>=2){await pose.send({image:v})}requestAnimationFrame(loop)}
+function take(){if(!stream){toast('Start the camera first');return}if(timer){toast('Get ready…');setTimeout(capture,timer*1000)}else capture()}
+function capture(){const out=document.createElement('canvas');out.width=v.videoWidth;out.height=v.videoHeight;out.getContext('2d').drawImage(v,0,0);out.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='PoseFrame-'+Date.now()+'.jpg';a.click();URL.revokeObjectURL(a.href);toast('Photo saved')},'image/jpeg',.94)}
+document.getElementById('snap').onclick=take;
+document.getElementById('timer').onclick=()=>{timer=timer===0?3:timer===3?5:0;document.getElementById('timer').textContent=timer?timer+'s':'—';toast(timer?`Timer ${timer}s`:'Timer off')};
+window.addEventListener('resize',size);size();setMode(mode);
+(function render(){drawTarget();requestAnimationFrame(render)})();
+loop();
+if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(()=>{})}
+</script>
+</body></html>

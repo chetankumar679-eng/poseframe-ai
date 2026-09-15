@@ -1,0 +1,10 @@
+{
+  "name":"PoseFrame AI",
+  "short_name":"PoseFrame",
+  "start_url":"./",
+  "display":"standalone",
+  "background_color":"#050507",
+  "theme_color":"#07070a",
+  "orientation":"portrait",
+  "icons":[]
+}
