@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#07070a"><meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest"><title>PoseFrame AI</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden;background:#050507;color:#fff;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+#app{height:100dvh;position:relative;background:#000}#video,#layer{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}#layer{pointer-events:none}
+.frontMirror{transform:scaleX(-1)}.shade{position:absolute;inset:0;background:linear-gradient(#0009,transparent 24%,transparent 67%,#000e);pointer-events:none}
+.top{position:absolute;top:max(12px,env(safe-area-inset-top));left:14px;right:14px;display:flex;justify-content:space-between;z-index:4}
+.pill,.scene{background:#0009;border:1px solid #fff2;border-radius:999px;padding:8px 12px;backdrop-filter:blur(14px);font-size:12px}.scene{position:absolute;top:65px;left:50%;transform:translateX(-50%);z-index:4;white-space:nowrap}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#76ffa7;box-shadow:0 0 9px #76ffa7;margin-right:6px}
+.hint{position:absolute;bottom:183px;left:15px;right:15px;text-align:center;z-index:4;text-shadow:0 2px 14px #000;font-weight:800}.hint small{display:block;color:#ddd;font-weight:400;margin-top:5px}
+.bottom{position:absolute;bottom:0;left:0;right:0;padding:9px 14px max(14px,env(safe-area-inset-bottom));z-index:4;background:linear-gradient(transparent,#000f 24%)}
+.row{display:flex;gap:7px;overflow:auto;scrollbar-width:none;padding-bottom:8px}.row::-webkit-scrollbar{display:none}
+button{font:inherit}.chip,.round{border:1px solid #fff2;background:#111c;color:#ddd}.chip{padding:8px 11px;border-radius:999px;white-space:nowrap;font-size:12px}.chip.active{background:#fff;color:#000;border-color:#fff}
+.controls{display:flex;justify-content:space-between;align-items:center}.round{width:46px;height:46px;border-radius:50%;color:#fff}.shutter{width:74px;height:74px;border:4px solid #fff;border-radius:50%;background:transparent;padding:5px}.shutter i{display:block;width:100%;height:100%;background:#fff;border-radius:50%}
+.drawer{position:absolute;left:12px;right:12px;bottom:135px;background:#0c0c10f2;border:1px solid #fff2;border-radius:18px;padding:12px;z-index:8;display:none;backdrop-filter:blur(16px)}.drawer.open{display:block}
+.gridlist{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.gridbtn{padding:10px 5px;border-radius:11px;border:1px solid #fff2;background:#15151a;color:#ddd;font-size:11px}.gridbtn.active{background:#fff;color:#000}
+#start{position:absolute;inset:0;z-index:20;background:#08080b;display:flex;align-items:center;justify-content:center;text-align:center;padding:25px}.card{max-width:355px}.logo{font-size:31px;font-weight:900}.card p{color:#aaa;line-height:1.5}.primary{background:#fff;color:#000;border:0;border-radius:14px;padding:14px 24px;font-weight:800}
+#score{position:absolute;right:13px;bottom:265px;z-index:5;background:#000b;border:1px solid #fff2;border-radius:14px;padding:9px 11px;font-size:11px;display:none}.bar{width:92px;height:4px;background:#fff2;margin-top:6px;border-radius:5px}.bar i{display:block;height:100%;width:80%;background:#fff;border-radius:5px}
+#toast{position:absolute;z-index:30;left:50%;bottom:125px;transform:translate(-50%,15px);opacity:0;background:#fff;color:#000;padding:10px 14px;border-radius:999px;font-size:12px;transition:.2s;white-space:nowrap}.show{opacity:1!important;transform:translate(-50%,0)!important}
+</style></head>
+<body><div id="app">
+<video id="video" autoplay muted playsinline></video><canvas id="layer"></canvas><div class="shade"></div>
+<div class="top"><div class="pill"><span class="dot"></span><span id="ai">AI STARTING</span></div><button class="round" id="flip">↻</button></div>
+<div class="scene" id="scene">AI Auto • camera guide</div>
+<div class="hint"><span id="main">Allow camera to begin</span><small id="sub">Live pose tracking + composition guides</small></div>
+<div id="score">Pose match <b id="scoreN">--</b><div class="bar"><i id="scoreB"></i></div></div>
+<div class="drawer" id="drawer"><b>Composition guides</b><div class="gridlist" id="gridlist"></div></div>
+<div class="bottom">
+<div class="row" id="modes"></div>
+<div class="controls"><button class="round" id="grid">▦</button><button class="shutter" id="snap"><i></i></button><button class="round" id="timer">3s</button></div>
+</div>
+<div id="toast"></div>
+<div id="start"><div class="card"><div class="logo">PoseFrame <span style="opacity:.4">AI</span></div><p>Live body landmarks, pose alignment and 12 photography composition guides. Camera processing stays on your device.</p><button class="primary" id="allow">Allow Camera</button></div></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+<script>
+const video=document.getElementById('video'),canvas=document.getElementById('layer'),ctx=canvas.getContext('2d');
+let stream=null,facing='user',mode='AI Auto',grid='thirds',timer=3,last=null,poseBusy=false;
+const modes=['AI Auto','Portrait','Full Body','Couple','Nature','Monument','Street'];
+const guides=[
+['thirds','Rule of Thirds'],['golden','Golden Spiral'],['diagonal','Dynamic Diagonal'],['triangle','Triangle'],['center','Centered Symmetry'],['symmetry','Mirror Symmetry'],
+['leading','Leading Lines'],['frame','Frame Within Frame'],['horizon','Horizon / 3:2'],['split','Foreground / Subject / Sky'],['vanishing','Vanishing Point'],['cinematic','Cinematic 2.39:1']
+];
+const advice={
+'AI Auto':['Find the strongest frame','AI pose tracking is active; choose a guide when no person is present'],
+'Portrait':['Turn 30° and relax your shoulders','Keep eyes near the upper third and leave look-space'],
+'Full Body':['Fit head and feet inside the frame','Shift weight to one leg; keep hands clear of the torso'],
+'Couple':['Create a soft diagonal','Place subjects at slightly different depths'],
+'Nature':['Use a leading line','Keep the main subject off-center and protect the horizon'],
+'Monument':['Try symmetry first','Align architectural edges; then test a low angle'],
+'Street':['Look for a frame within the frame','Use doorways, walls, shadows or vehicles as visual borders']
+};
+function toast(t){let e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),1700)}
+function size(){canvas.width=innerWidth*devicePixelRatio;canvas.height=innerHeight*devicePixelRatio}
+function setMode(m){mode=m;document.querySelectorAll('#modes .chip').forEach(b=>b.classList.toggle('active',b.textContent===m));document.getElementById('scene').textContent=m+' • live guide';document.getElementById('main').textContent=advice[m][0];document.getElementById('sub').textContent=advice[m][1]}
+modes.forEach(m=>{let b=document.createElement('button');b.className='chip';b.textContent=m;b.onclick=()=>setMode(m);document.getElementById('modes').appendChild(b)});
+guides.forEach((g,i)=>{let b=document.createElement('button');b.className='gridbtn'+(i===0?' active':'');b.textContent=g[1];b.onclick=()=>{grid=g[0];document.querySelectorAll('.gridbtn').forEach(q=>q.classList.remove('active'));b.classList.add('active');document.getElementById('drawer').classList.remove('open');toast(g[1])};document.getElementById('gridlist').appendChild(b)});
+document.getElementById('grid').onclick=()=>document.getElementById('drawer').classList.toggle('open');
+document.getElementById('flip').onclick=async()=>{facing=facing==='user'?'environment':'user';await startCamera()};
+document.getElementById('allow').onclick=startCamera;
+async function startCamera(){try{if(stream)stream.getTracks().forEach(t=>t.stop());stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:facing},width:{ideal:1280},height:{ideal:720}},audio:false});video.srcObject=stream;video.classList.toggle('frontMirror',facing==='user');document.getElementById('start').style.display='none';document.getElementById('ai').textContent='LIVE AI POSE';toast('Camera ready')}catch(e){toast('Camera blocked — open the HTTPS site and allow camera')}}
+function line(x1,y1,x2,y2){ctx.moveTo(x1,y1);ctx.lineTo(x2,y2)}
+function drawGuide(){
+ const W=innerWidth,H=innerHeight;ctx.clearRect(0,0,canvas.width,canvas.height);ctx.save();ctx.scale(devicePixelRatio,devicePixelRatio);
+ ctx.strokeStyle='#ffffff72';ctx.fillStyle='#ffffff14';ctx.lineWidth=1.4;
+ const third=()=>{line(W/3,0,W/3,H);line(W*2/3,0,W*2/3,H);line(0,H/3,W,H/3);line(0,H*2/3,W,H*2/3)};
+ if(grid==='thirds')third();
+ else if(grid==='golden'){const a=W*.382,b=H*.382;ctx.strokeRect(W*.05,H*.05,W*.9,H*.9);ctx.beginPath();ctx.arc(W*.62,H*.38,Math.min(a,b),0,Math.PI*1.5);ctx.stroke()}
+ else if(grid==='diagonal'){line(0,0,W,H);line(W,0,0,H);line(0,H*.25,W*.75,0);line(0,H*.75,W,H*.0)}
+ else if(grid==='triangle'){line(W*.1,H*.85,W/2,H*.12);line(W/2,H*.12,W*.9,H*.85);line(W*.1,H*.85,W*.9,H*.85)}
+ else if(grid==='center'||grid==='symmetry'){line(W/2,0,W/2,H);ctx.strokeRect(W*.12,H*.1,W*.76,H*.8)}
+ else if(grid==='leading'){line(0,H,W*.5,H*.45);line(W,H,W*.5,H*.45);line(0,H*.25,W*.5,H*.45);line(W,H*.25,W*.5,H*.45)}
+ else if(grid==='frame'){ctx.strokeRect(W*.07,H*.09,W*.86,H*.82);ctx.strokeRect(W*.16,H*.18,W*.68,H*.64)}
+ else if(grid==='horizon'){line(0,H*.38,W,H*.38);line(0,H*.62,W,H*.62);third()}
+ else if(grid==='split'){line(0,H*.25,W,H*.25);line(0,H*.58,W,H*.58)}
+ else if(grid==='vanishing'){line(0,H,W/2,H*.48);line(W,H,W/2,H*.48);line(0,H*.2,W/2,H*.48);line(W,H*.2,W/2,H*.48);ctx.beginPath();ctx.arc(W/2,H*.48,7,0,Math.PI*2);ctx.stroke()}
+ else if(grid==='cinematic'){ctx.fillStyle='#0008';ctx.fillRect(0,0,W,H*.11);ctx.fillRect(0,H*.89,W,H*.11);third()}
+ if(last) drawSkeleton(last,W,H);
+ ctx.restore();
+}
+const connections=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
+function drawSkeleton(lm,W,H){ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.beginPath();for(const [a,b] of connections){let p=lm[a],q=lm[b];if(p&&q&&p.visibility>.45&&q.visibility>.45)line(p.x*W,p.y*H,q.x*W,q.y*H)}ctx.stroke();ctx.fillStyle='#fff';for(const p of lm)if(p.visibility>.5){ctx.beginPath();ctx.arc(p.x*W,p.y*H,2.7,0,Math.PI*2);ctx.fill()}}
+function analyze(lm){let n=lm[0],l=lm[11],r=lm[12];if(!n||!l||!r)return;let dx=(l.x+r.x)/2-.5,score=90,text=advice[mode][0],sub=advice[mode][1];if(Math.abs(dx)>.08){text=dx<0?'Move right →':'Move left ←';score-=12}if(Math.abs(l.y-r.y)>.09){sub='Level your shoulders slightly';score-=7}document.getElementById('main').textContent=text;document.getElementById('sub').textContent=sub;document.getElementById('score').style.display='block';document.getElementById('scoreN').textContent=Math.max(55,score)+'%';document.getElementById('scoreB').style.width=Math.max(55,score)+'%'}
+const pose=new Pose({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`});pose.setOptions({modelComplexity:1,smoothLandmarks:true,minDetectionConfidence:.55,minTrackingConfidence:.55});pose.onResults(r=>{last=r.poseLandmarks||null;if(last)analyze(last);poseBusy=false});
+async function aiLoop(){if(video.readyState>=2&&!poseBusy){poseBusy=true;try{await pose.send({image:video})}catch(e){poseBusy=false}}requestAnimationFrame(aiLoop)}
+document.getElementById('snap').onclick=()=>{if(!stream)return toast('Start camera first');if(timer){toast('Get ready…');setTimeout(capture,timer*1000)}else capture()};
+document.getElementById('timer').onclick=()=>{timer=timer===0?3:timer===3?5:0;document.getElementById('timer').textContent=timer?timer+'s':'—';toast(timer?`Timer ${timer}s`:'Timer off')};
+function capture(){let o=document.createElement('canvas');o.width=video.videoWidth;o.height=video.videoHeight;let q=o.getContext('2d');if(facing==='user'){q.translate(o.width,0);q.scale(-1,1)}q.drawImage(video,0,0);o.toBlob(b=>{let a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='PoseFrame-'+Date.now()+'.jpg';a.click();URL.revokeObjectURL(a.href);toast('Photo saved')},'image/jpeg',.94)}
+function render(){drawGuide();requestAnimationFrame(render)}
+size();setMode(mode);render();aiLoop();
+</script></body></html>
